@@ -7,12 +7,13 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define index(x, y) (9 * (x) + y)
+#define index(x, y) (9 * (x) + (y))
 
 int ATTEMPT = 0;  // Track the number of attempts made. 
+int su[81];
+int mask[81];
 
-
-int _judge(int *su, int x, int y){
+int _judge(int x, int y){
   int gx = x/3 * 3;
   int gy = y/3 * 3;
   int it = su[index(x, y)];
@@ -34,7 +35,7 @@ int _judge(int *su, int x, int y){
   return 1;
 }
 
-int solveSukodu(int *su, int *mask, int x, int y){
+int solveSukodu(int x, int y){
   do {
     // Find the next undecided position.
     // If there is none, the sukodu has been solved. Return 1.
@@ -53,17 +54,108 @@ int solveSukodu(int *su, int *mask, int x, int y){
     c = c%9+1;
     su[index(x, y)] = c;
     // su[index(x, y)] = r;
-    if (_judge(su, x, y))
-      if (solveSukodu(su, mask, x, y))
+    if (_judge(x, y))
+      if (solveSukodu(x, y))
         return 1;
   }
   su[index(x, y)] = 0;
   return 0;
 }
 
-void init(int *su, int *mask, char* fname){
+struct Node{
+  int x,y,c,r;
+  struct Node *prev, *next;
+};
+
+struct Node *head = NULL, *end = NULL;
+
+void pushNode(struct Node *new_node){
+  ATTEMPT ++;
+  if (!head){
+    head = new_node;
+  } 
+  new_node->next = NULL;
+  new_node->prev = end;
+  end = new_node;
+  su[index(new_node->x, new_node->y)] = new_node->c;
+}
+
+struct Node* popNode(){
+  if (!head){
+    return NULL;
+  } else {
+    struct Node* ret = end;
+    end = end->prev;
+    if (end)  end->next = NULL;
+    ret->prev = NULL;
+    su[index(ret->x, ret->y)] = 0;
+    return ret;
+  }
+}
+
+int getNext(int *x, int *y){
+  do {
+    // Find the next undecided position.
+    // If there is none, the sukodu has been solved. Return 1.
+    if (*y == 8){
+      if (*x < 8) (*x)++, (*y)=0;
+      else return 0;
+    } else (*y)++;
+  } while (mask[index(*x, *y)]);
+  return 1;
+}
+
+int solveSukoduIter(){
+  // Find the next undecided position.
+  // If there is none, the sukodu has been solved. Return 1.
+  int x = 0, y = -1;
+  getNext(&x, &y);
+  
+  struct Node* prb = (struct Node*)malloc(sizeof(struct Node));
+  prb->x = x, prb->y = y, prb->r = 1, prb->c = rand()%9+1;
+  pushNode(prb);
+
+  while (head){
+    if (_judge(end->x, end->y)){
+      // If the last attempt is potentially correct,
+      // try the next location.
+      if (getNext(&x, &y)){
+        prb = (struct Node*)malloc(sizeof(struct Node));
+        prb->x = x, prb->y = y, prb->r = 1, prb->c = rand()%9+1;
+        pushNode(prb);
+      } else return 1;
+    } else {
+      // If the last attempt was wrong, 
+      // undo the last attempt.
+      prb = popNode();
+      if (prb->r < 9){
+        // If there are still changes at the last location, try again.
+        prb->r ++, prb->c = prb->c%9+1;
+        x = prb->x, y = prb->y;
+        pushNode(prb);
+      } else {
+        // All attempts at the location fails.
+        // The environment must have been wrong.
+        // Retry previous steps.
+        do {
+          free(prb);
+          prb = popNode();
+        } while (prb && prb->r>=9);
+        if (prb){
+           prb->r ++, prb->c = prb->c%9+1;
+           x = prb->x, y = prb->y;
+           pushNode(prb);
+        } else {
+          return 0;
+        }
+      }
+    }
+  }
+  return 0;
+}
+void init(char* fname){
   // Read the puzzle.
-  char buf[20];
+  char buf[100];
   FILE *fp = fopen(fname, "r");
   for (int i = 0; i < 9; i ++){
     fscanf(fp, "%s\n", buf);
@@ -79,7 +171,7 @@ void init(int *su, int *mask, char* fname){
   srand((unsigned) time(&t));
 }
 
-void print(int *su){
+void printSu(){
   for (int i = 0; i<9; i++){
     for (int j=0; j< 9; j++)
       printf("%d", su[index(i, j)]);
@@ -87,7 +179,7 @@ void print(int *su){
   }
 }
 
-int assert(int *su){
+int assert(){
   int sum = 0;
   for (int i = 0; i < 9; i++){
     sum = 0;
@@ -121,21 +213,18 @@ int assert(int *su){
 }
 
 int main(int argc, char** argv){
-  
-  int su[81];
-  int mask[81];
-  
-  init(su, mask, argv[1]);
+ 
+  init(argv[1]);
   
   printf("Original puzzle:\n");
-  print(su);
+  printSu();
 
-  int solved = solveSukodu(su, mask, 0, -1);
+  int solved = solveSukoduIter();
 
   if (solved){
     printf("Solution Found in %d attempts!\n", ATTEMPT);
-    print(su);
-    if (assert(su)) 
+    printSu();
+    if (assert()) 
       printf("Solution is correct!\n");
     else 
       printf("Solution wrong...\n");
