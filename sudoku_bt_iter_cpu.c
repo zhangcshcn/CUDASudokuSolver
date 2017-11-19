@@ -35,33 +35,97 @@ int _judge(int x, int y){
   return 1;
 }
 
-int solveSukodu(int x, int y){
+struct Node{
+  int x,y,c,r;
+  struct Node *prev, *next;
+};
+
+struct Node *head = NULL, *end = NULL;
+
+void pushNode(struct Node *new_node){
+  ATTEMPT ++;
+  if (!head){
+    head = new_node;
+  } 
+  new_node->next = NULL;
+  new_node->prev = end;
+  end = new_node;
+  su[index(new_node->x, new_node->y)] = new_node->c;
+}
+
+struct Node* popNode(){
+  if (!head){
+    return NULL;
+  } else {
+    struct Node* ret = end;
+    end = end->prev;
+    if (end)  end->next = NULL;
+    ret->prev = NULL;
+    su[index(ret->x, ret->y)] = 0;
+    return ret;
+  }
+}
+
+int getNext(int *x, int *y){
   do {
     // Find the next undecided position.
     // If there is none, the sukodu has been solved. Return 1.
-    if (y == 8){
-      if (x < 8) x++, y=0;
-      else return 1;
-    } else y++;
-  } while (mask[index(x, y)]);
-  // Try every possible value at (x, y).
-  // If a value is potentially legal, recursively solve the function.
-  // If all poosible values at (x, y) under the current setting doesn't
-  // lead to a solution, then, we have a dead end. Return 0.
-  int c = rand() % 9;
-  for (int r = 1; r <= 9; r ++){
-    ATTEMPT++;
-    c = c%9+1;
-    su[index(x, y)] = c;
-    // su[index(x, y)] = r;
-    if (_judge(x, y))
-      if (solveSukodu(x, y))
-        return 1;
-  }
-  su[index(x, y)] = 0;
-  return 0;
+    if (*y == 8){
+      if (*x < 8) (*x)++, (*y)=0;
+      else return 0;
+    } else (*y)++;
+  } while (mask[index(*x, *y)]);
+  return 1;
 }
 
+int solveSukoduIter(){
+  // Find the next undecided position.
+  // If there is none, the sukodu has been solved. Return 1.
+  int x = 0, y = -1;
+  getNext(&x, &y);
+  
+  struct Node* prb = (struct Node*)malloc(sizeof(struct Node));
+  prb->x = x, prb->y = y, prb->r = 1, prb->c = rand()%9+1;
+  pushNode(prb);
+
+  while (head){
+    if (_judge(end->x, end->y)){
+      // If the last attempt is potentially correct,
+      // try the next location.
+      if (getNext(&x, &y)){
+        prb = (struct Node*)malloc(sizeof(struct Node));
+        prb->x = x, prb->y = y, prb->r = 1, prb->c = rand()%9+1;
+        pushNode(prb);
+      } else return 1;
+    } else {
+      // If the last attempt was wrong, 
+      // undo the last attempt.
+      prb = popNode();
+      if (prb->r < 9){
+        // If there are still changes at the last location, try again.
+        prb->r ++, prb->c = prb->c%9+1;
+        x = prb->x, y = prb->y;
+        pushNode(prb);
+      } else {
+        // All attempts at the location fails.
+        // The environment must have been wrong.
+        // Retry previous steps.
+        do {
+          free(prb);
+          prb = popNode();
+        } while (prb && prb->r>=9);
+        if (prb){
+           prb->r ++, prb->c = prb->c%9+1;
+           x = prb->x, y = prb->y;
+           pushNode(prb);
+        } else {
+          return 0;
+        }
+      }
+    }
+  }
+  return 0;
+}
 void init(char* fname){
   // Read the puzzle.
   char buf[100];
@@ -128,7 +192,7 @@ int main(int argc, char** argv){
   printf("Original puzzle:\n");
   printSu();
 
-  int solved = solveSukodu(0, -1);
+  int solved = solveSukoduIter();
 
   if (solved){
     printf("Solution Found in %d attempts!\n", ATTEMPT);
