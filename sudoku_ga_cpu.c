@@ -248,18 +248,17 @@ int main(int argc, char** argv){
   int score = 0;
   int idxs[18];
   int mutation_rate = 30;
-  int accept_rate = 2;
+  int accept_rate = 1;
   int iterations = 10000000;
   for (int it = 1; it <= iterations; it ++){
     for (int k = 0; k < 18; k ++) idxs[k] = -1;
-    for (int k = 0; k < 9; k++){
       if (rand() % 100 <= mutation_rate) {
+        int k = rand()%9;
         int x, y;
         swapIdx(k, &x, &y);
         idxs[2*k] = x, idxs[2*k+1] = y;
         swap(k, x, y);
       }
-    }
     int new_score = scoreSudoku();
     if (new_score > score || rand() % 100 <= accept_rate){
       score = new_score;
