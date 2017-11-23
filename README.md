@@ -11,15 +11,17 @@ Generally, these algorithms are developed with the same philosophy
 underneath. Below is an algorithm with the idea is a stochastic process.
 
 1. Initialize the board such that each 3*3 grid contains a permutation 
-   of 1..9.
+   of 1..9.  
 1. In each step, with a probability, randomly choose two ungiven points 
-   in a 3*3 grid and swap them.
+   in a 3*3 grid and swap them.  
+
   2. Compute the score by summing up the number of unique numbers in each 
-     row and column. (A correct solution would have 162.)
-  2. If the new score is higher than the old score, accept the new board.
+     row and column. (A correct solution would have 162.)  
+  2. If the new score is higher than the old score, accept the new board.  
   2. If the new score is lower, accept the change with a propability, so 
-     that the search won't be stuck in a local optimum.
-1. Repeat until a solution is found.
+     that the search won't be stuck in a local optimum.  
+
+1. Repeat until a solution is found.  
 
 ### Parallelization
 
@@ -55,8 +57,8 @@ Now that we are implementing on CUDA, we need to explore the part that can be pa
 
 ### How to run
 
-  > make
-  > ./sudokusolver filename.in
+  > make  
+  > ./sudokusolver filename.in  
 
   It generates filename.sol
 
