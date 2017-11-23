@@ -300,18 +300,22 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
   }
   __syncthreads();
   // Reduce
-  if (threadIdx.y == 0){
-    #ifdef DEBUG
-    printf("Thread %d.%d have sum %d\n", blockIdx.x, threadIdx.x, scores_arch[threadIdx.x]);
-    #endif
-    for (int stride = 16; stride > 0 && threadIdx.x < stride; stride /= 2){
+  
+   
+  for (int stride = 16; stride > 0; stride /= 2){
+    if (threadIdx.y == 0 && threadIdx.x < stride){
       if (scores_arch[threadIdx.x] < scores_arch[threadIdx.x+ stride]) {
         scores_arch[threadIdx.x] = scores_arch[threadIdx.x+ stride];
         argmax[threadIdx.x] = argmax[threadIdx.x+stride];
       }
-    }
-    scores_best[blockIdx.x] = scores_arch[0];
+    }__syncthreads();
   }
+  if (threadIdx.y == 0){
+    #ifdef DEBUG
+    printf("Thread %d.%d have sum %d\n", blockIdx.x, threadIdx.x, scores_arch[threadIdx.x]);
+    #endif
+  }
+  scores_best[blockIdx.x] = scores_arch[0];
   __syncthreads();
   
   // Write back
