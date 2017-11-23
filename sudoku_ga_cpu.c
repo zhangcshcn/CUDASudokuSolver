@@ -78,10 +78,10 @@ void initBoard(){
       }
     }
     
-    for (int i = 0, k = 0; i < 9; i++){
+    for (int i = 0, kk = 0; i < 9; i++){
       if (!rec[i]){
-        rec[k] = i+1;
-        k++;
+        rec[kk] = i+1;
+        kk++;
       }
     }
     mutableCnt[k] = j;
@@ -272,7 +272,7 @@ int main(int argc, char** argv){
     }
   }
   printf("\n%d\n", scoreSudoku());
-  printBoardReadable(su);
+  printBoardReadable();
 
   return 0;
 }
