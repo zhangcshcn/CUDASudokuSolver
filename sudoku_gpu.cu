@@ -202,6 +202,7 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
   }
   __syncthreads();
   
+  // TODO: Optimize memory access.
   // Further copy.
   for (int i = 0; i < 9; i++){
     boards[81*threadIdx.x+index(threadIdx.y, i)] = mirror[index(threadIdx.y, i)];
@@ -242,7 +243,7 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
         #endif
       }
     }
-    
+    // TODO: make use of all threads.
     // Compute scores
     //  column
     if (threadIdx.y == 0){
@@ -335,31 +336,16 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
     }__syncthreads();
   }
   #endif
-
 }
 
 __global__ void updateBoardKernel(int* su, int* newSu, int opt){
   su[threadIdx.x] = newSu[threadIdx.x + 81*opt];
-  __syncthreads();
-
-  #ifdef DEBUG
-  if (threadIdx.x == 0){
-    printf("Update boards...\n");
-    for (int i = 0; i<9; i++){
-      for (int j=0; j< 9; j++){
-        printf("%d ", su[index(i, j)]);
-      }
-      printf("\n");
-    }
-  }
-  #endif
-  
+  __syncthreads();  
 }
 
-void solveSukodu(int* su_kernel, int* mutableIdx_kernel, int* mutableCnt_kernel, 
+void solveSukodu(int* su, int* su_kernel, int* mutableIdx_kernel, int* mutableCnt_kernel, 
                  int iterations, int resolution, int mutation_rate, int accept_rate, curandState *state){
   int score = 0;
-  int su[81];
   int *boards_best;
   int *scores_best;
   cudaMalloc((void**)&boards_best, NBLOCK*81*sizeof(int));
@@ -367,18 +353,10 @@ void solveSukodu(int* su_kernel, int* mutableIdx_kernel, int* mutableCnt_kernel,
   gpuErrchk(cudaDeviceSynchronize());
   dim3 dimBlock(32, 9); 
   for (int it = resolution; it <= iterations; it+=resolution){
-    printf("Launch kernels...\n");
     solveSukoduKernel<<<NBLOCK, dimBlock>>>(
         su_kernel, mutableIdx_kernel, mutableCnt_kernel,
         resolution, mutation_rate, accept_rate, state, boards_best, scores_best);
     gpuErrchk(cudaDeviceSynchronize());
-    printf("\tDone.\n");
-    #ifdef DEBUG
-    printf("Tournament of %d starts...\n", NBLOCK);
-    for (int ii = 0; ii < NBLOCK; ii ++)
-      printf("%d ",scores_best[ii]);
-    printf("\n");
-    #endif
 
     int opt = 0;
     int s = scores_best[0];
@@ -398,17 +376,19 @@ void solveSukodu(int* su_kernel, int* mutableIdx_kernel, int* mutableCnt_kernel,
         gpuErrchk(cudaDeviceSynchronize());
         printf("Solution found!");
         printf("\n%d/%d\tscore: %d\n", it, iterations, score);
-        printBoard(su);
-        break;
+        printBoardReadable(su);
+        
+        
+        return;
       } 
     }
-    
-    gpuErrchk(cudaDeviceSynchronize());
     cudaMemcpy(su, su_kernel, 81*sizeof(int), cudaMemcpyDeviceToHost);
     gpuErrchk(cudaDeviceSynchronize());
     printf("\n%d/%d\tscore: %d at %d\n", it, iterations, score, opt);
-    printBoard(su);
+    printBoardReadable(su);
   }
+  cudaFree(boards_best);
+  cudaFree(scores_best);
 }
 
 int main(int argc, char** argv){
@@ -426,10 +406,10 @@ int main(int argc, char** argv){
   init(argv[1], su,  mutableIdx, mutableCnt, state);
 
   printf("initialized.\n");
-  int mutation_rate = 100;
+  int mutation_rate = 30;
   int accept_rate = 5;
   int iterations = 1000000;
-  int resolution = 10000;
+  int resolution = 1000;
 
   int *su_kernel;
   int *mutableIdx_kernel;
@@ -444,10 +424,28 @@ int main(int argc, char** argv){
   cudaMemcpy(mutableIdx_kernel, mutableIdx, 81*sizeof(int), cudaMemcpyHostToDevice);
   cudaMemcpy(mutableCnt_kernel, mutableCnt, 9*sizeof(int), cudaMemcpyHostToDevice);
 
+  char fname[100];
+  int name_len = strlen(argv[1]);
+  for (int i = 0; i < name_len-2; i++)
+    fname[i] = argv[1][i];
+  strcpy(fname+name_len-2, "out");
+
   printf("Start solving...\n");
-  solveSukodu(su_kernel, mutableIdx_kernel, mutableCnt_kernel, 
+  solveSukodu(su, su_kernel, mutableIdx_kernel, mutableCnt_kernel, 
               iterations, resolution, mutation_rate, accept_rate, state);
   
+  FILE *fp = fopen(fname, "w+");
+  for (int ii = 0; ii < 3; ii ++){
+    for (int jj = 0; jj < 3; jj ++){
+      for (int i = 0; i < 3; i ++){
+        for (int j = 0; j < 3; j ++){
+          fprintf(fp, "%d",su[index(3*ii+i,3*jj+j)]);
+        }
+      }
+      fprintf(fp, "\n");
+    }
+  }
+        fclose(fp);
   cudaFree(su_kernel);
   cudaFree(mutableIdx_kernel);
   cudaFree(mutableCnt_kernel);
