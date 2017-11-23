@@ -14,7 +14,7 @@
 
 
 #define puzzlePb 32
-#define NBLOCK 9
+#define NBLOCK 10
 #define index(x, y) (9 * (x) + (y))
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
@@ -24,6 +24,47 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
       fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
       if (abort) exit(code);
    }
+}
+
+
+int scoreSudoku(int* su){
+  int score = 0;
+  // Score the rows
+  for (int ii = 0; ii < 3; ii++){
+    for (int jj = 0; jj < 3; jj++){
+      int nums[9];
+      memset(nums, 0, 9*sizeof(int));
+      for (int i = 0; i < 3; i++){
+        for (int j = 0; j < 3; j++){
+          nums[su[index(3*ii+i, 3*jj+j)]-1] ++;
+        }
+      }
+      for (int k = 0; k < 9; k++){
+        if (nums[k])  score += 1;
+      }
+    }
+  }
+  // Score the columns
+  for (int ii = 0; ii < 3; ii++){
+    for (int jj = 0; jj < 3; jj++){
+      int nums[9];
+      memset(nums, 0, 9*sizeof(int));
+      for (int i = 0; i < 3; i++){
+        for (int j = 0; j < 3; j ++){
+          nums[su[index(ii+3*i,jj+3*j)]-1] ++;
+        }
+      }
+      for (int k = 0; k < 9; k++){
+        if (nums[k])  score += 1;
+      }
+    }
+  }
+  return score;
+}
+
+int _assertSudoku(int* su){
+  if (scoreSudoku(su) == 162) return 1;
+  else return 0;
 }
 
 
@@ -216,18 +257,14 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
   
   for (int it = 0; it < resolution; it++){
     // The first warp do the mutation (or not).
-
     if (thread_index<32){
       scores[thread_index] = 0;
       argmax[thread_index] = thread_index;
       k = curand(state+block_index) % 9;
       mut = curand(state+block_index) % 100 <mutation_rate ? 1 : 0;
-      
       if (mut){
-        
         x = curand(state+block_index) % mutableCnt[k];
         y = curand(state+block_index) % mutableCnt[k];    
-        
         if (x == y){
           y = (y+1) % mutableCnt[k];
         }
@@ -243,7 +280,9 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
         #endif
       }
     }
-    // TODO: make use of all threads.
+    // Wait until the 
+    __syncthreads();
+
     // Compute scores
     //  column
     
@@ -264,7 +303,7 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
           if (loc[ii])  sum++;
           loc[ii] = 0;
         }
-      
+      __syncthreads();
       //  row
       
         subblock_x = (threadIdx.y/3) * 3;
@@ -414,7 +453,7 @@ int main(int argc, char** argv){
 
   printf("initialized.\n");
   int mutation_rate = 30;
-  int accept_rate = 2;
+  int accept_rate = 5;
   int iterations = 1000000;
   int resolution = 1000;
 
@@ -435,7 +474,7 @@ int main(int argc, char** argv){
   int name_len = strlen(argv[1]);
   for (int i = 0; i < name_len-2; i++)
     fname[i] = argv[1][i];
-  strcpy(fname+name_len-2, "out");
+  strcpy(fname+name_len-2, "sol");
 
   printf("Start solving...\n");
   solveSukodu(su, su_kernel, mutableIdx_kernel, mutableCnt_kernel, 
@@ -452,7 +491,9 @@ int main(int argc, char** argv){
       fprintf(fp, "\n");
     }
   }
-        fclose(fp);
+  fclose(fp);
+  if(scoreSudoku(su) == 162)  printf("\nThe solution is correct!\n");
+  else  printf("\nWrong solution...\n");
   cudaFree(su_kernel);
   cudaFree(mutableIdx_kernel);
   cudaFree(mutableCnt_kernel);
