@@ -188,7 +188,7 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
   __shared__ int mirror[81];
   __shared__ int boards[puzzlePb*81];
   __shared__ int scores_arch[puzzlePb];
-  __shared__ int scores[puzzlePb];
+  __shared__ int scores[puzzlePb*9];
   __shared__ int argmax[puzzlePb];
 
   // The index of thread in the block.
@@ -246,14 +246,14 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
     // TODO: make use of all threads.
     // Compute scores
     //  column
-    if (threadIdx.y == 0){
+    
       int subblock_x;
       int subblock_y;
       int sum = 0;
       int loc[9] = {0,0,0,0,0,0,0,0,0};
-      for (int i = 0; i < 9; i++){
-        subblock_x = i/3;
-        subblock_y = i%3;
+      
+        subblock_x = threadIdx.y/3;
+        subblock_y = threadIdx.y%3;
         for (int i = 0; i < 9; i+=3){
           for (int j = 0; j < 9; j+=3){
             loc[boards[81*threadIdx.x + index(i + subblock_x, j + subblock_y)]-1] = 1;
@@ -264,29 +264,34 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
           if (loc[ii])  sum++;
           loc[ii] = 0;
         }
-        scores[threadIdx.x] += sum;
-      }
+      
       //  row
-      for (int i = 0; i < 9; i++){
-        subblock_x = (i/3) * 3;
-        subblock_y = (i%3) * 3;
+      
+        subblock_x = (threadIdx.y/3) * 3;
+        subblock_y = (threadIdx.y%3) * 3;
         for (int i = 0; i < 3; i++){
           for (int j = 0; j < 3; j++){
             loc[boards[81*threadIdx.x + index(i + subblock_x, j + subblock_y)]-1] = 1;
           }
         }
-        sum = 0;
+
         for (int ii = 0; ii < 9; ii++){
           if (loc[ii])  sum++;
           loc[ii] = 0;
         }
-      
-        scores[threadIdx.x] += sum;
-      }
+        scores[index(threadIdx.x, threadIdx.y)] = sum;
+        __syncthreads();
+
+        for (int ii = 1; ii < 9; ii++){
+          if (threadIdx.y == 0){
+            scores[index(threadIdx.x, 0)] += scores[index(threadIdx.x, ii)];
+          }__syncthreads();
+        }
       if (threadIdx.y == 0){
-        if (scores[threadIdx.x] > scores_arch[threadIdx.x] || 
+        
+        if (scores[index(threadIdx.x, 0)] > scores_arch[threadIdx.x] || 
           scores_arch[threadIdx.x] != 162 && curand(state+block_index)%100 < accept_rate){
-          scores_arch[threadIdx.x] = scores[threadIdx.x];
+          scores_arch[threadIdx.x] = scores[index(threadIdx.x, 0)];
         }else{
           // Undo the swap if necessary.
           if (mut){
@@ -296,22 +301,24 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
           }
         }
       }
-    }
+      __syncthreads();
   }
   __syncthreads();
   // Reduce
-  if (threadIdx.y == 0){
-    #ifdef DEBUG
-    printf("Thread %d.%d have sum %d\n", blockIdx.x, threadIdx.x, scores_arch[threadIdx.x]);
-    #endif
-    for (int stride = 16; stride > 0 && threadIdx.x < stride; stride /= 2){
-      if (scores_arch[threadIdx.x] < scores_arch[threadIdx.x+ stride]) {
-        scores_arch[threadIdx.x] = scores_arch[threadIdx.x+ stride];
-        argmax[threadIdx.x] = argmax[threadIdx.x+stride];
-      }
+   
+  for (int stride = 16; stride > 0 ; stride /= 2){
+    if (threadIdx.y == 0 && threadIdx.x < stride){
+    if (scores_arch[threadIdx.x] < scores_arch[threadIdx.x+ stride]) {
+      scores_arch[threadIdx.x] = scores_arch[threadIdx.x+ stride];
+      argmax[threadIdx.x] = argmax[threadIdx.x+stride];
+      #ifdef DEBUG
+      printf("Thread %d.%d have sum %d\n", blockIdx.x, threadIdx.x, scores_arch[threadIdx.x]);
+      #endif
     }
-    scores_best[blockIdx.x] = scores_arch[0];
+    }__syncthreads();
   }
+  if (threadIdx.y == 0)
+    scores_best[blockIdx.x] = scores_arch[0];
   __syncthreads();
   
   // Write back
@@ -407,7 +414,7 @@ int main(int argc, char** argv){
 
   printf("initialized.\n");
   int mutation_rate = 30;
-  int accept_rate = 5;
+  int accept_rate = 2;
   int iterations = 1000000;
   int resolution = 1000;
 
