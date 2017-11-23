@@ -14,7 +14,7 @@
 
 
 #define puzzlePb 32
-#define NBLOCK 9
+#define NBLOCK 10
 #define index(x, y) (9 * (x) + (y))
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
@@ -24,6 +24,47 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
       fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
       if (abort) exit(code);
    }
+}
+
+
+int scoreSudoku(int* su){
+  int score = 0;
+  // Score the rows
+  for (int ii = 0; ii < 3; ii++){
+    for (int jj = 0; jj < 3; jj++){
+      int nums[9];
+      memset(nums, 0, 9*sizeof(int));
+      for (int i = 0; i < 3; i++){
+        for (int j = 0; j < 3; j++){
+          nums[su[index(3*ii+i, 3*jj+j)]-1] ++;
+        }
+      }
+      for (int k = 0; k < 9; k++){
+        if (nums[k])  score += 1;
+      }
+    }
+  }
+  // Score the columns
+  for (int ii = 0; ii < 3; ii++){
+    for (int jj = 0; jj < 3; jj++){
+      int nums[9];
+      memset(nums, 0, 9*sizeof(int));
+      for (int i = 0; i < 3; i++){
+        for (int j = 0; j < 3; j ++){
+          nums[su[index(ii+3*i,jj+3*j)]-1] ++;
+        }
+      }
+      for (int k = 0; k < 9; k++){
+        if (nums[k])  score += 1;
+      }
+    }
+  }
+  return score;
+}
+
+int _assertSudoku(int* su){
+  if (scoreSudoku(su) == 162) return 1;
+  else return 0;
 }
 
 
@@ -188,7 +229,7 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
   __shared__ int mirror[81];
   __shared__ int boards[puzzlePb*81];
   __shared__ int scores_arch[puzzlePb];
-  __shared__ int scores[puzzlePb];
+  __shared__ int scores[puzzlePb*9];
   __shared__ int argmax[puzzlePb];
 
   // The index of thread in the block.
@@ -216,18 +257,14 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
   
   for (int it = 0; it < resolution; it++){
     // The first warp do the mutation (or not).
-
     if (thread_index<32){
       scores[thread_index] = 0;
       argmax[thread_index] = thread_index;
       k = curand(state+block_index) % 9;
       mut = curand(state+block_index) % 100 <mutation_rate ? 1 : 0;
-      
       if (mut){
-        
         x = curand(state+block_index) % mutableCnt[k];
         y = curand(state+block_index) % mutableCnt[k];    
-        
         if (x == y){
           y = (y+1) % mutableCnt[k];
         }
@@ -243,17 +280,19 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
         #endif
       }
     }
-    // TODO: make use of all threads.
+    // Wait until the 
+    __syncthreads();
+
     // Compute scores
     //  column
-    if (threadIdx.y == 0){
+    
       int subblock_x;
       int subblock_y;
       int sum = 0;
       int loc[9] = {0,0,0,0,0,0,0,0,0};
-      for (int i = 0; i < 9; i++){
-        subblock_x = i/3;
-        subblock_y = i%3;
+      
+        subblock_x = threadIdx.y/3;
+        subblock_y = threadIdx.y%3;
         for (int i = 0; i < 9; i+=3){
           for (int j = 0; j < 9; j+=3){
             loc[boards[81*threadIdx.x + index(i + subblock_x, j + subblock_y)]-1] = 1;
@@ -264,29 +303,34 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
           if (loc[ii])  sum++;
           loc[ii] = 0;
         }
-        scores[threadIdx.x] += sum;
-      }
+      __syncthreads();
       //  row
-      for (int i = 0; i < 9; i++){
-        subblock_x = (i/3) * 3;
-        subblock_y = (i%3) * 3;
+      
+        subblock_x = (threadIdx.y/3) * 3;
+        subblock_y = (threadIdx.y%3) * 3;
         for (int i = 0; i < 3; i++){
           for (int j = 0; j < 3; j++){
             loc[boards[81*threadIdx.x + index(i + subblock_x, j + subblock_y)]-1] = 1;
           }
         }
-        sum = 0;
+
         for (int ii = 0; ii < 9; ii++){
           if (loc[ii])  sum++;
           loc[ii] = 0;
         }
-      
-        scores[threadIdx.x] += sum;
-      }
+        scores[index(threadIdx.x, threadIdx.y)] = sum;
+        __syncthreads();
+
+        for (int ii = 1; ii < 9; ii++){
+          if (threadIdx.y == 0){
+            scores[index(threadIdx.x, 0)] += scores[index(threadIdx.x, ii)];
+          }__syncthreads();
+        }
       if (threadIdx.y == 0){
-        if (scores[threadIdx.x] > scores_arch[threadIdx.x] || 
+        
+        if (scores[index(threadIdx.x, 0)] > scores_arch[threadIdx.x] || 
           scores_arch[threadIdx.x] != 162 && curand(state+block_index)%100 < accept_rate){
-          scores_arch[threadIdx.x] = scores[threadIdx.x];
+          scores_arch[threadIdx.x] = scores[index(threadIdx.x, 0)];
         }else{
           // Undo the swap if necessary.
           if (mut){
@@ -296,10 +340,11 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
           }
         }
       }
-    }
+      __syncthreads();
   }
   __syncthreads();
   // Reduce
+<<<<<<< HEAD
   
    
   for (int stride = 16; stride > 0; stride /= 2){
@@ -316,6 +361,22 @@ __global__ void solveSukoduKernel(int* su, int* mutableIdx, int* mutableCnt,
     #endif
   }
   scores_best[blockIdx.x] = scores_arch[0];
+=======
+   
+  for (int stride = 16; stride > 0 ; stride /= 2){
+    if (threadIdx.y == 0 && threadIdx.x < stride){
+    if (scores_arch[threadIdx.x] < scores_arch[threadIdx.x+ stride]) {
+      scores_arch[threadIdx.x] = scores_arch[threadIdx.x+ stride];
+      argmax[threadIdx.x] = argmax[threadIdx.x+stride];
+      #ifdef DEBUG
+      printf("Thread %d.%d have sum %d\n", blockIdx.x, threadIdx.x, scores_arch[threadIdx.x]);
+      #endif
+    }
+    }__syncthreads();
+  }
+  if (threadIdx.y == 0)
+    scores_best[blockIdx.x] = scores_arch[0];
+>>>>>>> threads
   __syncthreads();
   
   // Write back
@@ -432,7 +493,7 @@ int main(int argc, char** argv){
   int name_len = strlen(argv[1]);
   for (int i = 0; i < name_len-2; i++)
     fname[i] = argv[1][i];
-  strcpy(fname+name_len-2, "out");
+  strcpy(fname+name_len-2, "sol");
 
   printf("Start solving...\n");
   solveSukodu(su, su_kernel, mutableIdx_kernel, mutableCnt_kernel, 
@@ -449,7 +510,9 @@ int main(int argc, char** argv){
       fprintf(fp, "\n");
     }
   }
-        fclose(fp);
+  fclose(fp);
+  if(scoreSudoku(su) == 162)  printf("\nThe solution is correct!\n");
+  else  printf("\nWrong solution...\n");
   cudaFree(su_kernel);
   cudaFree(mutableIdx_kernel);
   cudaFree(mutableCnt_kernel);
