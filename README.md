@@ -2,6 +2,9 @@
 
 Author: Chen Zhang (cz1389)
 
+### Disclaimer
+This is originally the responce to Lab 3 for [Fall 2017 CSCI-GA.3033-004 Graphics Processing Units (GPUs): Architecture and Programming](https://cs.nyu.edu/courses/fall17/CSCI-GA.3033-004/) at New York University, taught by [Professor Mohamed Zahran](http://www.mzahran.com/). If you want to use this software for **academic purposes, aka assignments**, please refer to the [**ACADEMIC INTEGRITY**](https://cs.nyu.edu/home/master/current_policy.html).
+
 ### Stochastic approach to Sudoku
 
 There are some literatures about solving Sudoku in a parallelized 
